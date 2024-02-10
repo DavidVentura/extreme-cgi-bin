@@ -40,6 +40,9 @@ func httpServer(done chan int) {
 	server.Serve(listener)
 }
 func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
 	slog.Info("Process started")
 	done := make(chan int, 1)
 
