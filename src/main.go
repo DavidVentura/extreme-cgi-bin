@@ -2,8 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"html"
+	"encoding/json"
 	"log/slog"
 	"net"
 	"net/http"
@@ -11,7 +10,7 @@ import (
 	"time"
 )
 
-func httpServer(done chan int) {
+func httpServer(done chan int, iface net.Interface) {
 	server := &http.Server{
 		Addr: ":8080",
 		ConnState: func(c net.Conn, cs http.ConnState) {
@@ -22,9 +21,16 @@ func httpServer(done chan int) {
 	}
 
 	shutdownCtx, _ := context.WithTimeout(context.Background(), 1*time.Millisecond)
-	http.HandleFunc("/bar", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello, %q\n", html.EscapeString(r.URL.Path))
-		fmt.Fprintln(w, "bye, time to spawn a new computer")
+	ips, _ := iface.Addrs()
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			Ip  string
+			Mac string
+		}{
+			Ip:  ips[0].String(),
+			Mac: iface.HardwareAddr.String(),
+		})
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
@@ -52,11 +58,12 @@ func main() {
 	//
 	// we can bypass that by sending a gratuitous ARP reply
 	// on boot, to populate the ARP table of the host
-	for _, ifa := range arpNetInterfaces() {
+	ifaces := arpNetInterfaces()
+	for _, ifa := range ifaces {
 		sendGarpIface(ifa)
 	}
 
-	httpServer(done)
+	httpServer(done, ifaces[0])
 
 	<-done
 	slog.Info("Done")
