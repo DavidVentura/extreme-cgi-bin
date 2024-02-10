@@ -1,0 +1,15 @@
+[package]
+name = "example"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+displaydoc = "0.2.4"
+kvm-bindings = { version = "0.7.0", features = ["fam-wrappers"] }
+thiserror = "1.0.56"
+vmm = { git = "https://github.com/DavidVentura/firecracker.git", branch = "hugepages-minimal" }
+
+[patch.crates-io]
+kvm-bindings = { git = "https://github.com/firecracker-microvm/kvm-bindings", tag = "v0.7.0-2", features = ["fam-wrappers"] }
