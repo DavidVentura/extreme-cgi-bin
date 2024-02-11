@@ -332,7 +332,6 @@ version = "0.1.0"
 dependencies = [
  "displaydoc",
  "kvm-bindings",
- "lazy_static",
  "thiserror",
  "tun",
  "vmm",

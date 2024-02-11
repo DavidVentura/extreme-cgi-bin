@@ -1,8 +1,7 @@
 use crate::tcp_proxy;
-use lazy_static::lazy_static;
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -13,51 +12,73 @@ use vmm::vmm_config::instance_info::{InstanceInfo, VmState};
 use vmm::{EventManager, FcExitCode, HTTP_MAX_PAYLOAD_SIZE};
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
-pub enum UtilsError {
+enum UtilsError {
     /// Failed to create VmResources: {0}
     CreateVmResources(vmm::resources::ResourcesError),
     /// Failed to build microVM: {0}
     BuildMicroVm(#[from] StartMicrovmError),
 }
 
-lazy_static! {
-    // How do you do this properly???
-    static ref VMS: Mutex<Vec<VmNetCfg>> = Mutex::new(vec![]);
-}
-
-fn first_free_vm_idx(vms: &[VmNetCfg]) -> Option<usize> {
-    for i in 0..vms.len() {
-        if vms[i].free {
-            return Some(i);
-        }
-    }
-    None
-}
 fn nth_ip_in_subnet(subnet: Ipv4Addr, n: u8) -> Ipv4Addr {
     let ip_oct = subnet.octets();
     Ipv4Addr::new(ip_oct[0], ip_oct[1], ip_oct[2], ip_oct[3] + n)
 }
 
-pub(crate) fn populate_vm_configs(len: usize, subnet: Ipv4Addr) {
-    let netmask = Ipv4Addr::new(255, 255, 255, 252);
+pub struct VmHandler {
+    vms: Vec<VmNetCfg>,
+    free: AtomicU64,
+}
 
-    for j in 0..len {
-        let tap_ip = nth_ip_in_subnet(subnet, (j as u8) * 4 + 0);
-        let vm_ip = nth_ip_in_subnet(subnet, (j as u8) * 4 + 1);
-        let vm_mac = format!("06:00:AC:10:00:{j:02x}");
-        let tap_name =
-            crate::tap::add_tap(j as u16, tap_ip, netmask).expect("Failed to create a TAP device");
+impl VmHandler {
+    pub fn new(size: u8, subnet: Ipv4Addr) -> Result<VmHandler, Box<dyn Error>> {
+        if size >= 64 {
+            return Err("Up to 63 VMs per handler".into());
+        }
+        let mut bits: u64 = 0;
+        for i in 0..size {
+            bits |= 1 << i;
+        }
+        Ok(VmHandler {
+            vms: VmHandler::populate_vm_configs(size as usize, subnet),
+            free: AtomicU64::new(bits),
+        })
+    }
+    pub fn handle_tcp_conn(&self, inc: TcpStream) -> Result<(), Box<dyn Error>> {
+        let _free = self.free.load(Ordering::Relaxed);
+        if _free == 0 {
+            return Err("No free VMs to handle the request".into());
+        }
+        let first_idx = _free.trailing_zeros();
+        self.free.fetch_xor(1 << first_idx, Ordering::Relaxed);
+        let res = self.vms[first_idx as usize].handle_tcp_conn(inc);
+        self.free.fetch_or(1 << first_idx, Ordering::Relaxed);
+        res
+    }
 
-        VMS.lock().unwrap().push(VmNetCfg {
-            vm_ip,
-            tap_ip,
-            netmask,
-            vm_mac,
-            tap_iface: tap_name,
-            free: true,
-        });
+    fn populate_vm_configs(len: usize, subnet: Ipv4Addr) -> Vec<VmNetCfg> {
+        assert!(len <= 63);
+        let netmask = Ipv4Addr::new(255, 255, 255, 252);
+
+        let mut ret = vec![];
+        for j in 0..len {
+            let tap_ip = nth_ip_in_subnet(subnet, (j as u8) * 4 + 0);
+            let vm_ip = nth_ip_in_subnet(subnet, (j as u8) * 4 + 1);
+            let vm_mac = format!("06:00:AC:10:00:{j:02x}");
+            let tap_name = crate::tap::add_tap(j as u16, tap_ip, netmask)
+                .expect("Failed to create a TAP device");
+
+            ret.push(VmNetCfg {
+                vm_ip,
+                tap_ip,
+                netmask,
+                vm_mac,
+                tap_iface: tap_name,
+            });
+        }
+        ret
     }
 }
+
 #[derive(Clone)]
 pub(crate) struct VmNetCfg {
     vm_ip: Ipv4Addr,
@@ -65,33 +86,19 @@ pub(crate) struct VmNetCfg {
     netmask: Ipv4Addr,
     tap_iface: String,
     vm_mac: String,
-    free: bool,
 }
 
 impl VmNetCfg {
-    pub(crate) fn handle_tcp_conn(inc: TcpStream) -> Result<(), Box<dyn Error>> {
-        let idx = match first_free_vm_idx(&VMS.lock().unwrap()) {
-            None => {
-                return Err("no free vms, no request for you".into());
-            }
-            Some(i) => i,
-        };
+    pub(crate) fn handle_tcp_conn(&self, inc: TcpStream) -> Result<(), Box<dyn Error>> {
         let req_start = Instant::now();
-        let this = VMS.lock().unwrap()[idx].clone();
-        println!("Am handling as vmm {}", idx);
-        VMS.lock().unwrap()[idx].free = false;
-
-        let clone = this.clone();
-        thread::spawn(move || {
-            this.make().expect("Could not create VM");
-            VMS.lock().unwrap()[idx].free = true;
-        });
+        let clone = self.clone();
 
         thread::spawn(move || {
-            let cstr = clone.connect();
+            let cstr = clone.connect(); // this blocks until the TCP conn dies
             tcp_proxy::splice(inc, cstr);
-            println!("Request done in {:?}, idx: {}", req_start.elapsed(), idx);
+            println!("Request done in {:?}", req_start.elapsed());
         });
+        self.make().expect("Could not create VM"); // this blocks until the VM dies
         Ok(())
     }
 
