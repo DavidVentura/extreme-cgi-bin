@@ -24,6 +24,7 @@ func httpServer(done chan int, iface net.Interface) {
 	ips, _ := iface.Addrs()
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Connection", "close")
 		json.NewEncoder(w).Encode(struct {
 			Ip  string
 			Mac string
