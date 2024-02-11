@@ -8,7 +8,9 @@ edition = "2021"
 [dependencies]
 displaydoc = "0.2.4"
 kvm-bindings = { version = "0.7.0", features = ["fam-wrappers"] }
+lazy_static = "1.4.0"
 thiserror = "1.0.56"
+tun = { version = "0.6.1", default-features = false }
 vmm = { git = "https://github.com/DavidVentura/firecracker.git", branch = "hugepages-minimal" }
 
 [patch.crates-io]
