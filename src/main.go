@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func httpServer(done chan int, iface net.Interface) {
+func httpServer(done chan int, iface net.Interface, bootTime time.Time) {
 	server := &http.Server{
 		Addr: ":8080",
 		ConnState: func(c net.Conn, cs http.ConnState) {
@@ -25,12 +25,15 @@ func httpServer(done chan int, iface net.Interface) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Connection", "close")
+		now := time.Now()
 		json.NewEncoder(w).Encode(struct {
-			Ip  string
-			Mac string
+			Ip                        string
+			Mac                       string
+			TimeSinceLaunchingPid1_us int64
 		}{
-			Ip:  ips[0].String(),
-			Mac: iface.HardwareAddr.String(),
+			Ip:                        ips[0].String(),
+			Mac:                       iface.HardwareAddr.String(),
+			TimeSinceLaunchingPid1_us: now.Sub(bootTime).Microseconds(),
 		})
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -47,6 +50,8 @@ func httpServer(done chan int, iface net.Interface) {
 	server.Serve(listener)
 }
 func main() {
+	boot := time.Now()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
@@ -64,7 +69,7 @@ func main() {
 		sendGarpIface(ifa)
 	}
 
-	httpServer(done, ifaces[0])
+	httpServer(done, ifaces[0], boot)
 
 	<-done
 	slog.Info("Done")
