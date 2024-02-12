@@ -1,3 +1,4 @@
+use crate::tap;
 use crate::tcp_proxy;
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -56,6 +57,7 @@ impl VmHandler {
     }
 
     fn populate_vm_configs(len: usize, subnet: Ipv4Addr) -> Vec<VmNetCfg> {
+        // ip space runs out with this silly calculation for nth_ip_in_subnet
         assert!(len <= 63);
         let netmask = Ipv4Addr::new(255, 255, 255, 252);
 
@@ -63,29 +65,34 @@ impl VmHandler {
         for j in 0..len {
             let tap_ip = nth_ip_in_subnet(subnet, (j as u8) * 4 + 0);
             let vm_ip = nth_ip_in_subnet(subnet, (j as u8) * 4 + 1);
-            let vm_mac = format!("06:00:AC:10:00:{j:02x}");
+            let vm_mac: Vec<u8> = vec![0x06, 0x00, 0xAC, 0x10, 0x0, j as u8];
             let tap_name = crate::tap::add_tap(j as u16, tap_ip, netmask)
                 .expect("Failed to create a TAP device");
 
-            ret.push(VmNetCfg {
+            let v = VmNetCfg {
                 vm_ip,
                 tap_ip,
                 netmask,
                 vm_mac,
                 tap_iface: tap_name,
-            });
+            };
+            tap::register_vm_arp(&v).unwrap();
+            ret.push(v);
         }
+
+        println!("Sleeping 1.1s as the ARP cache gets wiped otherwise");
+        thread::sleep(Duration::from_millis(1100));
         ret
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct VmNetCfg {
-    vm_ip: Ipv4Addr,
+    pub(crate) vm_ip: Ipv4Addr,
     tap_ip: Ipv4Addr,
     netmask: Ipv4Addr,
-    tap_iface: String,
-    vm_mac: String,
+    pub(crate) tap_iface: String,
+    pub(crate) vm_mac: Vec<u8>,
 }
 
 impl VmNetCfg {
@@ -134,6 +141,11 @@ impl VmNetCfg {
 
         let boot_args = format!("panic=-1 reboot=t quiet ip.dev_wait_ms=0 root=/dev/vda ip={0}::{1}:{2}:hostname:eth0:off init=/init", self.vm_ip, self.tap_ip, self.netmask);
         // TODO: figure out how to pass a real config and not json :^)
+        let mac_str: Vec<String> = self
+            .vm_mac
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         let config = format!(
             r#"
 {{
@@ -158,7 +170,8 @@ impl VmNetCfg {
     "host_dev_name": "{1}"
   }}]
 }}"#,
-            self.vm_mac, self.tap_iface
+            mac_str.join(":"),
+            self.tap_iface
         );
         let mut vm_resources =
             VmResources::from_json(&config, &instance_info, HTTP_MAX_PAYLOAD_SIZE, None)
