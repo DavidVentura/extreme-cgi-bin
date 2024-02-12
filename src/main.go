@@ -64,12 +64,12 @@ func main() {
 	//
 	// we can bypass that by sending a gratuitous ARP reply
 	// on boot, to populate the ARP table of the host
-	ifaces := arpNetInterfaces()
-	for _, ifa := range ifaces {
-		sendGarpIface(ifa)
-	}
+	ifaces, _ := net.Interfaces()
+	//for _, ifa := range ifaces {
+	//	sendGarpIface(ifa)
+	//}
 
-	httpServer(done, ifaces[0], boot)
+	httpServer(done, ifaces[1], boot)
 
 	<-done
 	slog.Info("Done")
