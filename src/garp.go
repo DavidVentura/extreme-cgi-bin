@@ -51,14 +51,6 @@ func sendGarpIface(ifa net.Interface) {
 		}
 	}
 }
-func broadcastAddr(ip net.IP, mask net.IPMask) net.IP {
-	ret := make(net.IP, 4)
-	maskIp := net.IP(mask).To4()
-	addrU32 := binary.BigEndian.Uint32(ip.To4()) | ^binary.BigEndian.Uint32(maskIp)
-	binary.BigEndian.PutUint32(ret, addrU32)
-	return ret
-}
-
 func garpPayload(mac net.HardwareAddr, ip net.IP, mask net.IPMask) []byte {
 	// https://datatracker.ietf.org/doc/html/rfc826
 	// https://datatracker.ietf.org/doc/html/rfc5227
@@ -70,7 +62,6 @@ func garpPayload(mac net.HardwareAddr, ip net.IP, mask net.IPMask) []byte {
 	hwAddrLen := uint8(6)    // mac len
 	protoAddrLen := uint8(4) // ipv4 len
 	opcode := uint16(2)      // reply
-	broadcastIp := broadcastAddr(ip, mask)
 
 	binary.BigEndian.PutUint16(b[0:2], uint16(hwType))
 	binary.BigEndian.PutUint16(b[2:4], protoType)
@@ -80,7 +71,7 @@ func garpPayload(mac net.HardwareAddr, ip net.IP, mask net.IPMask) []byte {
 	copy(b[8:8+hwAddrLen], mac)
 	copy(b[14:14+protoAddrLen], ip)
 	copy(b[18:18+hwAddrLen], ethernet.Broadcast)
-	copy(b[24:24+protoAddrLen], broadcastIp)
+	copy(b[24:24+protoAddrLen], ip)
 	return b
 }
 
