@@ -1,4 +1,4 @@
-module github.com/DavidVentura/extreme-cgi-bin
+module github.com/DavidVentura/extreme-cgi-bin/init
 
 go 1.21.0
 
