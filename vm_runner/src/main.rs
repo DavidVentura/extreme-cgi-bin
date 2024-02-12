@@ -14,7 +14,7 @@ fn main() {
     let max_concurrent_vms: u8 = 63;
     let subnet = Ipv4Addr::new(172, 16, 0, 0);
 
-    rlimit::Resource::NOFILE.set(2048, 2048);
+    rlimit::Resource::NOFILE.set(2048, 2048).unwrap();
     let handler = match VmHandler::new(max_concurrent_vms, subnet) {
         Ok(h) => h,
         Err(e) => {

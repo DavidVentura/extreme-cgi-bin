@@ -333,9 +333,11 @@ dependencies = [
  "displaydoc",
  "kvm-bindings",
  "libc",
+ "linux-loader",
  "rlimit",
  "thiserror",
  "tun",
+ "utils",
  "vmm",
 ]
 
@@ -708,7 +710,6 @@ checksum = "f98d2aa92eebf49b69786be48e4477826b256916e84a57ff2a4f21923b48eb4c"
 [[package]]
 name = "seccompiler"
 version = "1.7.0-dev"
-source = "git+https://github.com/DavidVentura/firecracker.git?branch=hugepages-minimal#6f14487e4642fc7a369016edcea9935d6e547677"
 dependencies = [
  "bincode",
  "displaydoc",
@@ -915,7 +916,6 @@ dependencies = [
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/DavidVentura/firecracker.git?branch=hugepages-minimal#6f14487e4642fc7a369016edcea9935d6e547677"
 dependencies = [
  "derive_more",
  "displaydoc",
@@ -991,7 +991,6 @@ checksum = "6de3dc0146d78558327419fac388850fc6cbf197e924c4659a4863db20b5af64"
 [[package]]
 name = "vmm"
 version = "0.1.0"
-source = "git+https://github.com/DavidVentura/firecracker.git?branch=hugepages-minimal#6f14487e4642fc7a369016edcea9935d6e547677"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",

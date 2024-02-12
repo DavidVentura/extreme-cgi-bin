@@ -1,21 +1,26 @@
 use crate::tap;
 use crate::tcp_proxy;
 use std::error::Error;
+use std::fs::File;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+use utils::net::mac::MacAddr;
 use vmm::builder::{build_and_boot_microvm, StartMicrovmError};
+use vmm::devices::virtio::block_common::CacheType;
 use vmm::resources::VmResources;
 use vmm::seccomp_filters::get_empty_filters;
+use vmm::vmm_config::boot_source::{BootConfig, BootSource, BootSourceConfig};
+use vmm::vmm_config::drive::{BlockBuilder, BlockDeviceConfig};
 use vmm::vmm_config::instance_info::{InstanceInfo, VmState};
-use vmm::{EventManager, FcExitCode, HTTP_MAX_PAYLOAD_SIZE};
+use vmm::vmm_config::machine_config::VmConfig;
+use vmm::vmm_config::net::{NetBuilder, NetworkInterfaceConfig};
+use vmm::{EventManager, FcExitCode};
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
 enum UtilsError {
-    /// Failed to create VmResources: {0}
-    CreateVmResources(vmm::resources::ResourcesError),
     /// Failed to build microVM: {0}
     BuildMicroVm(#[from] StartMicrovmError),
 }
@@ -140,43 +145,59 @@ impl VmNetCfg {
         };
 
         let boot_args = format!("panic=-1 reboot=t quiet ip.dev_wait_ms=0 root=/dev/vda ip={0}::{1}:{2}:hostname:eth0:off init=/init", self.vm_ip, self.tap_ip, self.netmask);
-        // TODO: figure out how to pass a real config and not json :^)
-        let mac_str: Vec<String> = self
-            .vm_mac
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        let config = format!(
-            r#"
-{{
-  "boot-source": {{
-    "kernel_image_path": "/home/david/git/lk/vmlinux-mini-net",
-    "boot_args": "{boot_args}"
-  }},
-  "machine-config": {{
-    "vcpu_count": 1,
-    "backed_by_hugepages": true,
-    "mem_size_mib": 32
-  }},
-  "drives": [{{
-    "drive_id": "rootfs",
-    "path_on_host": "artifacts/rootfs.ext4",
-    "is_root_device": true,
-    "is_read_only": false
-  }}],
-  "network-interfaces": [{{
-    "iface_id": "net0",
-    "guest_mac": "{0}",
-    "host_dev_name": "{1}"
-  }}]
-}}"#,
-            mac_str.join(":"),
-            self.tap_iface
-        );
-        let mut vm_resources =
-            VmResources::from_json(&config, &instance_info, HTTP_MAX_PAYLOAD_SIZE, None)
-                .map_err(UtilsError::CreateVmResources)?;
-        vm_resources.boot_timer = false;
+        let vm_config = VmConfig {
+            vcpu_count: 1,
+            mem_size_mib: 32,
+            smt: false,
+            cpu_template: None,
+            track_dirty_pages: false,
+            backed_by_hugepages: true,
+        };
+        let boot_source = BootSource {
+            config: BootSourceConfig::default(),
+            builder: Some(BootConfig {
+                cmdline: linux_loader::cmdline::Cmdline::try_from(&boot_args, 4096).unwrap(),
+                // i guess 4k for size is good
+                kernel_file: File::open("/home/david/git/lk/vmlinux-mini-net").unwrap(),
+                initrd_file: None,
+            }),
+        };
+
+        let mut net_builder = NetBuilder::new();
+        net_builder
+            .build(NetworkInterfaceConfig {
+                iface_id: "net0".to_string(),
+                host_dev_name: self.tap_iface.clone(),
+                guest_mac: Some(MacAddr::from_bytes_unchecked(&self.vm_mac)),
+                rx_rate_limiter: None,
+                tx_rate_limiter: None,
+            })
+            .unwrap();
+
+        let mut block = BlockBuilder::new();
+        block
+            .insert(BlockDeviceConfig {
+                drive_id: "block1".to_string(),
+                partuuid: Some("deadbeef-01".to_string()),
+                is_root_device: false,
+                cache_type: CacheType::Unsafe,
+
+                is_read_only: Some(false),
+                path_on_host: Some("artifacts/rootfs.ext4".to_string()),
+                rate_limiter: None,
+                file_engine_type: None,
+
+                socket: None,
+            })
+            .unwrap();
+        let vm_resources = VmResources {
+            vm_config,
+            boot_source,
+            net_builder,
+            block,
+            boot_timer: false,
+            ..Default::default()
+        };
 
         let mut event_manager = EventManager::new().unwrap();
         let seccomp_filters = get_empty_filters();

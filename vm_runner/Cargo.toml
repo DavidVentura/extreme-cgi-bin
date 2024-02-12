@@ -9,10 +9,12 @@ edition = "2021"
 displaydoc = "0.2.4"
 kvm-bindings = { version = "0.7.0", features = ["fam-wrappers"] }
 libc = "0.2.153"
+linux-loader = "0.10.0"
 rlimit = "0.10.1"
 thiserror = "1.0.56"
 tun = { version = "0.6.1", default-features = false }
-vmm = { git = "https://github.com/DavidVentura/firecracker.git", branch = "hugepages-minimal" }
+vmm = { path = "/home/david/git/firecracker/src/vmm" }
+utils = { path = "/home/david/git/firecracker/src/utils" }
 
 [patch.crates-io]
 kvm-bindings = { git = "https://github.com/firecracker-microvm/kvm-bindings", tag = "v0.7.0-2", features = ["fam-wrappers"] }
